@@ -1,0 +1,6 @@
+hello:
+    this: 0
+    is: 1
+    some: 2
+    yaml: 3
+goodbye: [a, b, c]

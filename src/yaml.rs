@@ -1,13 +1,25 @@
 use crate::data::{Position, Spanned, SpannedValue, Value};
 use crate::error::{ContextualError, Error};
+use crate::validator::Validator;
 use linked_hash_map::LinkedHashMap;
+use std::path::Path;
 use yaml_rust::parser::{Event, Parser};
 use yaml_rust::scanner::{ScanError, TScalarStyle, TokenType};
 use yaml_rust::Yaml;
 
+pub fn load_from_file<P: AsRef<Path>, V: Validator>(
+    path: P,
+    validator: &V,
+) -> Result<SpannedValue, Error> {
+    let s = std::fs::read_to_string(path)?;
+    let v = load_stream(s.chars())?;
+    validator.validate(&v)?;
+    Ok(v)
+}
+
 impl From<ScanError> for ContextualError {
     fn from(err: ScanError) -> Self {
-        Self {}
+        ContextualError::new(&format!("{}", err))
     }
 }
 
@@ -19,7 +31,7 @@ fn load_stream<T: Iterator<Item = char>>(src: T) -> Result<SpannedValue, Context
     assert_eq!(parser.next()?.0, Event::DocumentEnd);
     let (event, marker) = parser.next()?;
     if event != Event::StreamEnd {
-        Err(ContextualError {})
+        Err(ContextualError::new("expected end of file"))
     } else {
         Ok(value)
     }
@@ -43,16 +55,16 @@ fn load_node<T: Iterator<Item = char>>(
                         "bool" => value
                             .parse::<bool>()
                             .map(|x| Value::Boolean(x))
-                            .map_err(|_| ContextualError {}),
+                            .map_err(|_| ContextualError::new("invalid boolean")),
                         "int" => value
                             .parse::<i64>()
                             .map(|x| Value::Integer(x))
-                            .map_err(|_| ContextualError {}),
+                            .map_err(|_| ContextualError::new("invalid integer")),
                         "float" => value
                             .parse::<f64>()
                             .map(|x| Value::Float(x))
-                            .map_err(|_| ContextualError {}),
-                        "null" => Err(ContextualError {}),
+                            .map_err(|_| ContextualError::new("invalid float")),
+                        "null" => Err(ContextualError::new("null not allowed")),
                         _ => Ok(Value::String(value)),
                     }
                 } else {
@@ -82,17 +94,17 @@ fn load_node<T: Iterator<Item = char>>(
                 let key = load_node(parser)?;
                 let value = load_node(parser)?;
                 let keyspan = key.span();
-                let s = if let Value::String(s) = key.into_inner() {
-                    Ok(s)
+                let s = if let Value::String(s) = key.as_ref() {
+                    Ok(s.to_owned())
                 } else {
-                    Err(ContextualError {})
+                    Err(ContextualError::new("unexpected non-string key"))
                 }?;
-                map.insert(Spanned::new(s, keyspan.0, keyspan.1), load_node(parser)?);
+                map.insert(Spanned::new(s, keyspan.0, keyspan.1), value);
             }
             assert_eq!(parser.next()?.0, Event::MappingEnd);
             Ok(Value::Map(map))
         }
-        _ => Err(ContextualError {}),
+        _ => Err(ContextualError::new("unexpected type")),
     };
     parsed.map(|x| Spanned::new(x, start, start))
 }

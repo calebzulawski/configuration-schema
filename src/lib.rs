@@ -1,5 +1,6 @@
-mod data;
-mod error;
+pub mod data;
+pub mod error;
+pub mod validator;
 
 #[cfg(feature = "yaml")]
-mod yaml;
+pub mod yaml;
